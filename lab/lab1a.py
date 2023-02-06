@@ -8,10 +8,9 @@ import matplotlib.pyplot as plt
 
 speed = 10
 
-X = 0
-Y = 0
 DIR = 'N'
 DIR_RIGHT_TRANSFORMATION = {'N' : 'E', 'E' : 'S', 'S' : 'W', 'W' : 'N'}
+DIR_LEFT_TRANSFORMATION = {'N' : 'W', 'E' : 'N', 'S' : 'E', 'W' : 'S'}
 
 MOVE = {
     'N' : {
@@ -36,24 +35,29 @@ MOVE = {
     },
 }
 
-turn_time = 1.3
+turn_time = 1.33
 
 graph = {}
 
-# class Direction(Enum):
-#     N = ()
-
 def move_forward():
+    global DIR
     fc.forward(speed)
-    time.sleep(1.3)
+    if DIR == 'E': 
+        time.sleep(0.3)
+    time.sleep(1.2)
     fc.stop()
 
 def turn_left():
+    print("turn_left")
+    global DIR
     fc.turn_left(speed)
-    time.sleep(turn_time)
+    time.sleep(turn_time+0.2)
     fc.stop()
+    DIR = DIR_LEFT_TRANSFORMATION[DIR]
 
 def turn_right():
+    print("turn_right")
+    global DIR
     fc.turn_right(speed)
     time.sleep(turn_time)
     fc.stop()
@@ -91,11 +95,7 @@ def scan_environment():
     time.sleep(0.2)
 
     dist_list = np.array(dist_list)
-    print(dist_list)
     angle_list = np.array([i for i in range(0, 181, 5)])
-    
-    ind = (dist_list > 35) & (dist_list < 0)
-    dist_list[ind] = np.inf
     
     return dist_list, angle_list
 
@@ -106,14 +106,14 @@ def get_xy_coord(dist, angle):
     return x, y
 
 def can_forward():
+    global DIR
     dist_list, angle_list = scan_environment() 
-    print(dist_list)
     x, y = get_xy_coord(dist_list, angle_list)
-    print(x)
     
-    l = not np.any(dist_list[0:12] <= 15)
-    m = not np.any(dist_list[12:25] <= 15)
-    r = not np.any(dist_list[25:37] <= 15)
+    l = not np.any(dist_list[0:12] <= 35)
+    m = not np.any((dist_list[12:25] <= 35) & (dist_list[12:25] > 0))
+    r = not np.any(dist_list[25:37] <= 35)
+    print("DIR:", DIR, "can_forward m:", dist_list[12:25])
     return m
     # return [l & m, m, r & m]
     
@@ -126,38 +126,112 @@ def sub_pair(pair1, pair2):
 def euclidean_dist(curr, dest):
     return np.sqrt((dest[0] - curr[0]) ** 2 + (dest[1] - curr[1]) ** 2)
 
+def exploration_order(curr, dest):
+    dx = dest[0] - curr[0]
+    dy = dest[1] - curr[1]
+
+    if dx == 0 and dy > 0:
+        return ['N', 'E', 'S', 'W']
+    elif dx == 0 and dy < 0:
+        return ['S', 'W', 'N', 'E'] 
+    elif dx > 0 and dy == 0:
+        return ['E', 'S', 'W', 'N']
+    elif dx < 0 and dy == 0:
+        return ['W', 'N', 'E', 'S']
+
+    if dx > 0 and dy > 0:
+        return ['N', 'E', 'S', 'W']
+    elif dx > 0 and dy < 0:
+        return ['E', 'S', 'W', 'N']
+    elif dx < 0 and dy > 0:
+        return ['W', 'N', 'E', 'S']
+    else:
+        return ['S', 'W', 'N', 'E'] 
+
+def change_dir(curr, dest):
+    print("change_dir:", curr, dest)
+    if dest == 'N':
+        if curr == 'W':
+            turn_right()
+        elif curr == 'E':
+            turn_left()
+        elif curr == 'S':
+            turn_right()
+            turn_right()
+    elif dest == 'E':
+        if curr == 'S':
+            turn_left()
+        elif curr == 'N':
+            turn_right()
+        elif curr == 'W':
+            turn_right()
+            turn_right()
+    elif dest == 'W':
+        if curr == 'N':
+            turn_left()
+        elif curr == 'S':
+            turn_right()
+        elif curr == 'E':
+            turn_right()
+            turn_right()
+    else:
+        if curr == 'E':
+            turn_right()
+        elif curr == 'W':
+            turn_left()
+        elif curr == 'N':
+            turn_right()
+            turn_right()
+
 def a_star(dest):
+    global DIR
+    VISITED = set()
     X = 0
     Y = 0
 
     pq = PriorityQueue()
+    # <dist, <nextx, nexty>>
+    #min heap
     pq.put((0, (X, Y)))
 
     while not pq.empty():
-        curr = pq.get()
+        curr = pq.get()[1]
+        print("-----------------------------------")
+        print("curr:", X, Y)
 
-        change = sub_pair(curr[1], tuple([X, Y]))
-        print(change)
+        change = sub_pair(curr, (X, Y))
 
         if change != (0, 0):
             while MOVE[DIR]['f'] != change:
                 turn_right()
             move_forward()
-        
-        print("hello")
+            print("move forward to:", curr, "facing:", DIR)
 
-        X = curr[1][0]
-        Y = curr[1][1]
+        X = curr[0]
+        Y = curr[1]
 
-        if tuple([X, Y]) == dest:
+        if (X, Y) == dest:
             break
         
-        for _ in range(4):
+        dir_order = exploration_order(curr, dest)
+        print("dir_order:", dir_order)
+        change_dir(DIR, dir_order[0])
+        for d in dir_order:
+            next_pair = add_pair(curr, MOVE[DIR]['f'])
+            if next_pair in VISITED:
+                print("DIR:", DIR, "next_pair:", next_pair, "in set")
+                turn_right()
+                continue
+
             move_f = can_forward()
             if move_f:
-                new_pair = add_pair(curr[1], MOVE[DIR]['f'])
-                pq.put((euclidean_dist(new_pair, dest), new_pair)) 
+                pq.put((euclidean_dist(next_pair, dest), next_pair)) 
+                print("pushing to pq:", next_pair, "dist:", euclidean_dist(next_pair, dest))
+                break
             turn_right()
+        
+        VISITED.add(curr)
+
     
 
         
@@ -171,24 +245,39 @@ def a_star(dest):
 
 if __name__ == "__main__":
     try:
-        a_star((0, 3))
+        time.sleep(10)
+        a_star((0, 6))
+        time.sleep(10)
+        a_star((4, 8))
     finally:
         fc.stop()
 
 
-    # turn_right()
 
-    # dist_list, angle_list = scan_environment() 
-    # x, y = get_xy_coord(dist_list, angle_list)
-    # print(dist_list)
-    # print(angle_list)
-    # plt.scatter(x, y)
-    # plt.show()
-    # try: 
-    #     main()
-    # finally: 
-    #     fc.stop()
-        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
